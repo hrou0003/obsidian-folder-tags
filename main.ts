@@ -9,7 +9,7 @@ import {
 	Modal,
 } from "obsidian";
 
-interface FolderTags {
+export interface FolderTags {
 	path: string;
 	tags: FolderTag[];
 }
@@ -154,7 +154,7 @@ export default class FolderTagsPlugin extends Plugin {
 		await this.saveSettings();
 	}
 
-	private async addTagsToFileContent(file: TFile, newTags: Set<FolderTag>) {
+	public async addTagsToFileContent(file: TFile, newTags: Set<FolderTag>) {
 		if (newTags.size === 0) return;
 
 		const content = await this.app.vault.read(file);
@@ -221,7 +221,7 @@ export default class FolderTagsPlugin extends Plugin {
 		}
 	}
 
-	private async removeTagsFromFileContent(
+	public async removeTagsFromFileContent(
 		file: TFile,
 		tagsForRemoval: Set<FolderTag>,
 	) {
@@ -367,7 +367,7 @@ export default class FolderTagsPlugin extends Plugin {
 	}
 }
 
-interface FolderTag {
+export interface FolderTag {
 	inherited: boolean;
 	tag: string;
 }
@@ -452,8 +452,6 @@ class TagInputModal extends Modal {
 			this.onSubmit(this.tags.filter((t) => !t.inherited));
 			this.close();
 		};
-
-		this.addStyles();
 	}
 
 	createTagPill(container: HTMLElement, folderTag: FolderTag) {
