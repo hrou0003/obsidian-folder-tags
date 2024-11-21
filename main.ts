@@ -475,61 +475,6 @@ class TagInputModal extends Modal {
 		}
 	}
 
-	addStyles() {
-		document.head.appendChild(
-			createEl("style", {
-				attr: {
-					type: "text/css",
-				},
-				text: `
-                .tag-input-container {
-                    border: 1px solid var(--background-modifier-border);
-                    border-radius: 4px;
-                    padding: 8px;
-                    margin-bottom: 16px;
-                    min-height: 36px;
-                }
-                .tag-container {
-                    display: flex;
-                    flex-wrap: wrap;
-                    gap: 8px;
-                    margin-bottom: 8px;
-                }
-                .tag-pill {
-                    background-color: var(--interactive-accent);
-                    color: var(--text-on-accent);
-                    padding: 4px 8px;
-                    border-radius: 16px;
-                    display: inline-flex;
-                    align-items: center;
-                    gap: 4px;
-                }
-                .tag-delete {
-                    cursor: pointer;
-                    font-weight: bold;
-                    padding: 0 4px;
-                }
-                .tag-delete:hover {
-                    opacity: 0.8;
-                }
-                input {
-                    width: 100%;
-                    border: none;
-                    outline: none;
-                    background: transparent;
-                }
-                .button-container {
-                    display: flex;
-                    justify-content: flex-end;
-                }
-                .tag-save-button {
-                    margin-top: 8px;
-                }
-            `,
-			}),
-		);
-	}
-
 	onClose() {
 		const { contentEl } = this;
 		contentEl.empty();
