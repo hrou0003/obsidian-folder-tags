@@ -9,13 +9,13 @@ import {
 	Modal,
 } from "obsidian";
 
-interface FolderTag {
+interface FolderTags {
 	path: string;
-	tags: string[];
+	tags: FolderTag[];
 }
 
 interface FolderTagsSettings {
-	folderTags: FolderTag[];
+	folderTags: FolderTags[];
 }
 
 const DEFAULT_SETTINGS: FolderTagsSettings = {
@@ -92,7 +92,7 @@ export default class FolderTagsPlugin extends Plugin {
 		// Update all file tags when settings change
 	}
 
-	getFolderTags(folderPath: string): string[] {
+	getFolderTags(folderPath: string): FolderTag[] {
 		// Get direct tags for this folder
 		const folderTag = this.settings.folderTags.find(
 			(ft) => ft.path === folderPath,
@@ -106,9 +106,10 @@ export default class FolderTagsPlugin extends Plugin {
 		return Array.from(new Set([...directTags, ...parentTags]));
 	}
 
-	getInheritedTags(path: string): string[] {
+	getInheritedTags(path: string) {
 		const pathParts = path.split("/");
-		let inheritedTags: string[] = [];
+		pathParts.pop();
+		let inheritedTags: FolderTag[] = [];
 		let currentPath = "";
 
 		// Build up path progressively to check each parent folder
@@ -122,14 +123,21 @@ export default class FolderTagsPlugin extends Plugin {
 				(ft) => ft.path === currentPath,
 			);
 			if (folderTag) {
-				inheritedTags = [...inheritedTags, ...folderTag.tags];
+				inheritedTags = [
+					...inheritedTags.map(
+						(t) => ({ tag: t.tag, inherited: true }) as FolderTag,
+					),
+					...folderTag.tags.map(
+						(t) => ({ tag: t.tag, inherited: true }) as FolderTag,
+					),
+				];
 			}
 		}
 
 		return inheritedTags;
 	}
 
-	async setFolderTags(folderPath: string, tags: string[]) {
+	async saveFolderTags(folderPath: string, tags: FolderTag[]) {
 		const existingIndex = this.settings.folderTags.findIndex(
 			(ft) => ft.path === folderPath,
 		);
@@ -146,7 +154,7 @@ export default class FolderTagsPlugin extends Plugin {
 		await this.saveSettings();
 	}
 
-	private async addTagsToFileContent(file: TFile, newTags: Set<string>) {
+	private async addTagsToFileContent(file: TFile, newTags: Set<FolderTag>) {
 		if (newTags.size === 0) return;
 
 		const content = await this.app.vault.read(file);
@@ -155,26 +163,21 @@ export default class FolderTagsPlugin extends Plugin {
 		// Get all existing tags in the file
 		const existingTags = new Set<string>();
 
-		// Get tags from frontmatter
-		if (metadata?.frontmatter?.tags) {
-			const fmTags = metadata.frontmatter.tags;
-			if (Array.isArray(fmTags)) {
-				fmTags.forEach((tag) => existingTags.add(tag));
-			} else {
-				existingTags.add(fmTags);
-			}
-		}
+		console.log(metadata?.tags);
 
 		// Get inline tags
 		if (metadata?.tags) {
-			Object.keys(metadata.tags).forEach((tag) => {
-				existingTags.add(tag.substring(1));
+			metadata.tags?.forEach((tag) => {
+				console.log(tag);
+				existingTags.add(tag.tag.substring(1));
 			});
 		}
 
+		console.log(existingTags);
+		console.log(newTags);
 		// Filter out tags that already exist
 		const tagsToAdd = new Set(
-			[...newTags].filter((tag) => !existingTags.has(tag)),
+			[...newTags].filter((tag) => !existingTags.has(tag.tag)),
 		);
 		if (tagsToAdd.size === 0) return;
 
@@ -191,7 +194,7 @@ export default class FolderTagsPlugin extends Plugin {
 						...(Array.isArray(existingTags)
 							? existingTags
 							: [existingTags]),
-						...newTags,
+						...tagsToAdd,
 					]),
 				);
 
@@ -208,8 +211,8 @@ export default class FolderTagsPlugin extends Plugin {
 		}
 		// Else add it to the bottom of the file
 		else {
-			const tagString = Array.from(newTags)
-				.map((tag) => `#${tag}`)
+			const tagString = Array.from(tagsToAdd)
+				.map((tag) => `#${tag.tag}`)
 				.join(" ");
 
 			const newContent = `${content.trimEnd()}\n\n${tagString}`;
@@ -220,7 +223,7 @@ export default class FolderTagsPlugin extends Plugin {
 
 	private async removeTagsFromFileContent(
 		file: TFile,
-		tagsForRemoval: Set<string>,
+		tagsForRemoval: Set<FolderTag>,
 	) {
 		if (tagsForRemoval.size === 0) return;
 
@@ -240,7 +243,10 @@ export default class FolderTagsPlugin extends Plugin {
 						? yaml.tags
 						: [yaml.tags];
 					yaml.tags = existingTags.filter(
-						(tag: string) => !tagsForRemoval.has(tag),
+						(tag: string) =>
+							!new Array(...tagsForRemoval).some(
+								(t) => t.tag == tag,
+							),
 					);
 
 					// If tags array is empty, remove the tags property
@@ -259,7 +265,7 @@ export default class FolderTagsPlugin extends Plugin {
 
 		// Remove inline tags
 		const tagsToRemovePattern = Array.from(tagsForRemoval)
-			.map((tag) => `#${tag}`)
+			.map((tag) => `#${tag.tag}`)
 			.join("|");
 		if (tagsToRemovePattern) {
 			const tagRegex = new RegExp(`\\s*(${tagsToRemovePattern})\\b`, "g");
@@ -311,25 +317,38 @@ export default class FolderTagsPlugin extends Plugin {
 	}
 
 	async addTagsToFolder(folder: TFolder) {
-		const existingTags = this.getFolderTags(folder.path);
+		const currentFolderTag = this.settings.folderTags.find(
+			(ft) => ft.path === folder.path,
+		);
+		const currentTags = currentFolderTag ? currentFolderTag.tags : [];
+		const inheritedTags = this.getInheritedTags(folder.path);
+
+		// Convert to FolderTag array
+		const folderTags: Set<FolderTag> = new Set([
+			...inheritedTags,
+			...currentTags,
+		]);
+
 		const modal = new TagInputModal(
 			this.app,
-			existingTags,
+			new Array(...folderTags),
 			async (newTags) => {
 				// Find tags that were removed
 				const removedTags = new Set(
-					existingTags.filter((tag) => !newTags.includes(tag)),
-				);
-
-				// Find tags that were added
-				const addedTags = new Set(
-					newTags.filter((tag) => !existingTags.includes(tag)),
+					currentTags.filter(
+						(tag) =>
+							!newTags.some(
+								(t) =>
+									t.tag == tag.tag &&
+									t.inherited == tag.inherited,
+							),
+					),
 				);
 
 				// Update folder settings
-				await this.setFolderTags(folder.path, newTags);
+				await this.saveFolderTags(folder.path, newTags);
 
-				// Update all files in the folder and subfolders
+				const addedTags = new Set(newTags);
 				const files = this.app.vault
 					.getFiles()
 					.filter((file) => file.path.startsWith(folder.path));
@@ -348,17 +367,22 @@ export default class FolderTagsPlugin extends Plugin {
 	}
 }
 
+interface FolderTag {
+	inherited: boolean;
+	tag: string;
+}
+
 class TagInputModal extends Modal {
-	tags: string[];
-	onSubmit: (tags: string[]) => void;
+	tags: FolderTag[];
+	onSubmit: (tags: FolderTag[]) => void;
 
 	constructor(
 		app: App,
-		existingTags: string[],
-		onSubmit: (tags: string[]) => void,
+		tags: FolderTag[],
+		onSubmit: (tags: FolderTag[]) => void,
 	) {
 		super(app);
-		this.tags = existingTags;
+		this.tags = tags;
 		this.onSubmit = onSubmit;
 	}
 
@@ -367,23 +391,143 @@ class TagInputModal extends Modal {
 
 		contentEl.createEl("h2", { text: "Enter folder tags" });
 
-		const inputEl = contentEl.createEl("input", {
-			type: "text",
-			value: this.tags.join(", "),
+		const inputContainer = contentEl.createEl("div", {
+			cls: "tag-input-container",
 		});
 
-		const buttonEl = contentEl.createEl("button", {
+		const tagContainer = inputContainer.createEl("div", {
+			cls: "tag-container",
+		});
+
+		const inputEl = inputContainer.createEl("input", {
+			type: "text",
+			placeholder: "Type and press space to add tags",
+		});
+
+		// Add all tags, handling inherited and current differently
+		this.tags.forEach((folderTag) =>
+			this.createTagPill(tagContainer, folderTag),
+		);
+
+		const buttonContainer = contentEl.createEl("div", {
+			cls: "button-container",
+		});
+
+		const buttonEl = buttonContainer.createEl("button", {
 			text: "Save",
+			cls: "tag-save-button",
+		});
+
+		inputEl.addEventListener("keydown", (e) => {
+			if (e.key === " " && inputEl.value.trim()) {
+				e.preventDefault();
+				const newTagStr = inputEl.value.trim();
+				if (!this.tags.some((t) => t.tag === newTagStr)) {
+					this.tags.push({ tag: newTagStr, inherited: false });
+					this.createTagPill(tagContainer, {
+						tag: newTagStr,
+						inherited: false,
+					});
+				}
+				inputEl.value = "";
+			} else if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+				e.preventDefault();
+				const finalInput = inputEl.value.trim();
+				if (
+					finalInput &&
+					!this.tags.some((t) => t.tag === finalInput)
+				) {
+					this.tags.push({ tag: finalInput, inherited: false });
+				}
+				this.onSubmit(this.tags.filter((t) => !t.inherited));
+				this.close();
+			}
 		});
 
 		buttonEl.onclick = () => {
-			const newTags = inputEl.value
-				.split(",")
-				.map((tag) => tag.trim())
-				.filter((tag) => tag.length > 0);
-			this.onSubmit(newTags);
+			const finalInput = inputEl.value.trim();
+			if (finalInput && !this.tags.some((t) => t.tag === finalInput)) {
+				this.tags.push({ tag: finalInput, inherited: false });
+			}
+			this.onSubmit(this.tags.filter((t) => !t.inherited));
 			this.close();
 		};
+
+		this.addStyles();
+	}
+
+	createTagPill(container: HTMLElement, folderTag: FolderTag) {
+		const pillEl = container.createEl("div", {
+			cls: `tag-pill ${folderTag.inherited ? "inherited" : ""}`,
+			text: folderTag.tag,
+		});
+
+		if (!folderTag.inherited) {
+			const deleteBtn = pillEl.createEl("span", {
+				cls: "tag-delete",
+				text: "×",
+			});
+
+			deleteBtn.onclick = () => {
+				this.tags = this.tags.filter((t) => t.tag !== folderTag.tag);
+				pillEl.remove();
+			};
+		}
+	}
+
+	addStyles() {
+		document.head.appendChild(
+			createEl("style", {
+				attr: {
+					type: "text/css",
+				},
+				text: `
+                .tag-input-container {
+                    border: 1px solid var(--background-modifier-border);
+                    border-radius: 4px;
+                    padding: 8px;
+                    margin-bottom: 16px;
+                    min-height: 36px;
+                }
+                .tag-container {
+                    display: flex;
+                    flex-wrap: wrap;
+                    gap: 8px;
+                    margin-bottom: 8px;
+                }
+                .tag-pill {
+                    background-color: var(--interactive-accent);
+                    color: var(--text-on-accent);
+                    padding: 4px 8px;
+                    border-radius: 16px;
+                    display: inline-flex;
+                    align-items: center;
+                    gap: 4px;
+                }
+                .tag-delete {
+                    cursor: pointer;
+                    font-weight: bold;
+                    padding: 0 4px;
+                }
+                .tag-delete:hover {
+                    opacity: 0.8;
+                }
+                input {
+                    width: 100%;
+                    border: none;
+                    outline: none;
+                    background: transparent;
+                }
+                .button-container {
+                    display: flex;
+                    justify-content: flex-end;
+                }
+                .tag-save-button {
+                    margin-top: 8px;
+                }
+            `,
+			}),
+		);
 	}
 
 	onClose() {
@@ -409,14 +553,14 @@ class FolderTagsSettingTab extends PluginSettingTab {
 		this.plugin.settings.folderTags.forEach((folderTag) => {
 			new Setting(containerEl)
 				.setName(folderTag.path)
-				.setDesc(`Tags: ${folderTag.tags.join(", ")}`)
+				.setDesc(`Tags: ${folderTag.tags.map((t) => t.tag).join(", ")}`)
 				.addButton((button) =>
 					button.setButtonText("Edit").onClick(async () => {
 						const modal = new TagInputModal(
 							this.app,
 							folderTag.tags,
 							async (newTags) => {
-								await this.plugin.setFolderTags(
+								await this.plugin.saveFolderTags(
 									folderTag.path,
 									newTags,
 								);
